@@ -393,6 +393,99 @@ function parse(
   }
 
 
+// DEMONSTRATE SWITCH STATEMENT PARSING
+
+function parseSwitchCases(
+    sourceCode: string,
+    startPos: number,
+    indentLevel: number,
+    options: PrettyPrintOptions
+): [string, string[]] {
+    let formattedCode = "";
+    const errors: string[] = [];
+    let currentPos = startPos;
+    let currentFragment = getNextFragment(sourceCode, currentPos);
+    const caseValues = new Set(); // Track case values to detect duplicates
+
+    while (currentFragment && currentFragment.value !== "}") {
+        if (
+            currentFragment.type & FragmentType.Keyword &&
+            (currentFragment.value === "case" ||
+                currentFragment.value === "default")
+        ) {
+            // Handle case or default
+            formattedCode +=
+                "\n" + " ".repeat(indentLevel) + currentFragment.value + " ";
+            currentPos = currentFragment.end;
+
+            if (currentFragment.value === "case") {
+                // Parse case expression and check for duplicates
+                const [caseExpr, caseErrors, newCasePos] = parseExpression(
+                    sourceCode,
+                    currentPos,
+                    0,
+                    options
+                );
+                const caseValue = evaluateExpression(caseExpr); // Evaluate the case expression if possible
+                if (caseValues.has(caseValue)) {
+                    errors.push(
+                        new ParserError(
+                            `Duplicate case value: ${caseValue}`,
+                            getLineAndColumnFromMask(locationMask)
+                        )
+                    );
+                } else {
+                    caseValues.add(caseValue);
+                }
+                formattedCode += codeGen(caseExpr);
+                errors.push(...caseErrors);
+                currentPos = newCasePos;
+            }
+
+            // Parse colon
+            const colonFragment = getNextFragment(sourceCode, currentPos);
+            if (!colonFragment || colonFragment.value !== ":") {
+                errors.push(
+                    new ParserError(
+                        "Missing colon after case or default",
+                        getLineAndColumnFromMask(locationMask)
+                    )
+                );
+                break;
+            }
+            currentPos = colonFragment.end;
+            formattedCode += ":\n";
+
+            // Parse case body (statements) with increased indentation
+            indentLevel += options.indentWidth;
+            const [caseBodyCode, caseBodyErrors] = parseStatement(
+                sourceCode,
+                currentPos,
+                indentLevel,
+                options,
+                true, // Inside a switch
+                null // No label for switch cases
+            );
+            formattedCode += caseBodyCode;
+            errors.push(...caseBodyErrors);
+            indentLevel -= options.indentWidth;
+        } else {
+            // Handle errors or unexpected tokens
+            errors.push(
+                new ParserError(
+                    "Unexpected token in switch statement",
+                    getLineAndColumnFromMask(locationMask)
+                )
+            );
+            break;
+        }
+
+        currentFragment = getNextFragment(sourceCode, currentPos);
+    }
+
+    return [formattedCode, errors];
+}
+
 // DEMONSTRATION OF PRETTY PRINTING
 
 // Printer class for formatting (enhanced to mimic Prettier style)
