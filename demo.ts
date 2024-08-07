@@ -579,3 +579,28 @@ function preserveComments(
       originalCode.substring(originalPos) + formattedCode.substring(formattedPos);
     return result;
 }
+
+
+// PROOF OF CONCEPT FOR CONSTANT FOLDING
+
+function minifyAndFold(node: any, sourceCode: string): string {
+
+  // Constant folding for expressions (optimized)
+  if (
+    (node.type === "BinaryExpression" || node.type === "UnaryExpression") &&
+    canFoldExpression(node) // Check if the expression can be folded
+  ) {
+    const foldedValue = evaluateExpression(node);
+    if (foldedValue !== null) {
+      // Replace the expression with its folded value
+      const [start, end] = findExpressionBoundaries(node, sourceCode);
+      sourceCode =
+        sourceCode.slice(0, start) +
+        foldedValue.toString() +
+        sourceCode.slice(end);
+      currentPos = start + foldedValue.toString().length;
+    }
+  }
+
+  // fold child nodes...
+}
