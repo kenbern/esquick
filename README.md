@@ -1,6 +1,6 @@
 # esquick
 
-Improve to professional developer English 
+** DEMO
 
 This is demonstration code. The code is converted to typescript code from my private non open source code.
 
