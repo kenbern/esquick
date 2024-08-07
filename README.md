@@ -14,6 +14,9 @@ What it does
 * minify ala Terser
 * linter aka EsLint with plugin support 
 * Handle comments
+* incremental parsing
+* effective and simple type checking
+* watch mode
 
 It's build for high performance using a fragment approach.
 
