@@ -125,7 +125,6 @@ for (let i = 0; i < 128; i++) {
   } else if (char >= "0" && char <= "9") {
     charTypes[i] = FragmentType.Literal;
   }
-  // ... (classify other characters)
 }
 
 // Global symbol table and scope
@@ -343,6 +342,56 @@ function parse(
 
   return formattedCode; 
 }
+
+
+// DEMONSTRATE HOW TO ADVANCE TO NEXT FRAGMENT 
+
+  function getNextFragment(source: string, start: number): Fragment | null {
+    
+    // NOTE: Not all code added in this demo
+    
+    // Handle regular expression literals
+    if (source[end] === "/") {
+      let value = "/";
+      end++;
+      let inCharacterClass = false;
+      while (end < source.length) {
+        if (source[end] === "/" && !inCharacterClass) {
+          value += "/";
+          end++;
+          break;
+        } else if (source[end] === "[") {
+          inCharacterClass = true;
+        } else if (source[end] === "]") {
+          inCharacterClass = false;
+        } else if (source[end] === "\\") {
+          end++; // Skip escaped character
+        }
+        value += source[end];
+        end++;
+      }
+
+      // Parse flags (if any)
+      while (end < source.length && /[gimsuy]/.test(source[end])) {
+        value += source[end];
+        end++;
+      }
+
+      return { type: FragmentType.Literal, value, start, end };
+    }
+
+    // No valid fragment found
+    if (type === FragmentType.None) {
+      // Handle unknown fragment types
+      return {
+        type: FragmentType.None,
+        value: source[end],
+        start: end,
+        end: end + 1,
+      };
+    }
+  }
+
 
 // DEMONSTRATION OF PRETTY PRINTING
 
