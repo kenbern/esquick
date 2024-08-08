@@ -165,7 +165,7 @@ export function getNextFragment(
     let nextNonWhitespaceFragment = getNextNonWhitespaceFragment(source, end);
     if (nextNonWhitespaceFragment) {
       nextNonWhitespaceFragment.hasCommentBefore = true;
-      fragmentCache.set(`<span class="math-inline">\{nextNonWhitespaceFragment\.start\}\-</span>{source.slice(nextNonWhitespaceFragment.start)}`, nextNonWhitespaceFragment); 
+      fragmentCache.set({nextNonWhitespaceFragment.start} - {source.slice(nextNonWhitespaceFragment.start), nextNonWhitespaceFragment); 
     }
 
     currentPos = end;
