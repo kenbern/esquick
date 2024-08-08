@@ -1,4 +1,4 @@
-import { Fragment, FragmentType } from "./fragment"; // Assuming you have a separate `fragment.ts` file
+import { Fragment, FragmentType } from "./fragment"; 
 
 // Bitmasks for fragment types
 const fragmentTypeMasks = {
@@ -38,10 +38,9 @@ for (let i = 0; i < 128; i++) {
       ? FragmentType.Operator
       : FragmentType.Punctuator;
   }
-  // ... handle other ASCII characters as needed
-}
+ }
 
-// Lookup tables for keywords, operators, and punctuators (from parser.ts)
+// Lookup tables for keywords, operators, and punctuators
 // ... (keywordsTable, operatorsTable, punctuatorsTable)
 
 // Sets for reserved words (strict mode and module code)
@@ -410,8 +409,7 @@ export function getNextFragment(
         rawContent += "`";
         end++;
         break;
-      } else if (source[end] === "<span class="math-inline">" && source\[end \+ 1\] \=\=\= "\{"\) \{
-cookedContent \+\= "</span>{";
+      } else if (source[end] === source[end + 1] === "{") cookedContent += "{";
         rawContent += "${";
         end += 2;
         inExpression = true;
@@ -505,7 +503,7 @@ cookedContent \+\= "</span>{";
 
 // Helper function to check if escape sequence decoding is needed
 function needsEscapeDecoding(options: ParserOptions): boolean {
-  // You might need escape decoding for constant folding, linting, or other transformations
+  // we need escape decoding for constant folding, linting, or other transformations
   return options.minify || options.enableDCE || lintingPlugins.length > 0;
 }
 
@@ -596,7 +594,7 @@ function handleStringEscape(source: string, start: number): [string | null, numb
         return [null, start];
       }
       // ... (parse up to 3 octal digits)
-      return [null, start]; // Placeholder - replace with actual parsing logic
+      return [null, start]; // TODO
     case "\n":
     case "\r":
     case "\u2028":
@@ -606,10 +604,9 @@ function handleStringEscape(source: string, start: number): [string | null, numb
       return ["", end];
     default:
       // Other escape sequences or invalid escapes
-      // You might want to handle specific cases or report errors here
+      // TODO! handle specific cases or report errors here
       end++; 
       return [escapedChar, end];
   }
 }
 
-// ... (rest of the lexer code)
