@@ -1,21 +1,69 @@
-// lexer.ts
+// PORT OF PRIVATE CODE TO TYPESCRIPT 
+//
+// DO NOT USE!!
 
-// ... (FragmentType enum, Fragment interface, charFlags, lookup tables, etc.)
+import { Fragment, FragmentType } from "./fragment";
+
+// ... (operator precedence, fragmentTypeMasks, bitmasks for number literal types)
+
+// Character classification bit flags
+const kIsAsciiIdentifierStart = 1 << 0;
+const kIsAsciiIdentifierPart = 1 << 1;
+const kIsDecimalDigit = 1 << 2;
+const kIsHexDigit = 1 << 3;
+const kIsOctalDigit = 1 << 4;
+const kIsBinaryDigit = 1 << 5;
+const kIsWhitespace = 1 << 6;
+const kIsLineTerminator = 1 << 7;
+
+// Character flags lookup table
+const charFlags = new Uint8Array(128);
+for (let i = 0; i < 128; i++) {
+  const char = String.fromCharCode(i);
+  let flags = 0;
+
+  if (/[a-zA-Z$_]/.test(char)) flags |= kIsAsciiIdentifierStart | kIsAsciiIdentifierPart;
+  if (/[0-9]/.test(char)) flags |= kIsDecimalDigit | kIsHexDigit | kIsOctalDigit;
+  if (/[0-1]/.test(char)) flags |= kIsBinaryDigit;
+  if (/\s/.test(char)) flags |= kIsWhitespace;
+  if (/\n|\r|\u2028|\u2029/.test(char)) flags |= kIsLineTerminator;
+
+  charFlags[i] = flags;
+}
+
+// Sets for reserved words (strict mode and module code)
+const strictModeReservedWords = new Set([
+  "implements", "interface", "package", "private", "protected", "public", "static", 
+  "let", "yield", "await" // These are reserved in strict mode if not used as identifiers
+]);
+
+const moduleCodeReservedWords = new Set([
+  "await", "implements", "interface", "package", "private", "protected", "public", "static"
+  // ... other module code reserved words
+]);
+
+// Bitmask for tracking line and column information
+const LINE_BITS = 20;
+const COLUMN_BITS = 12;
+const LINE_MASK = (1 << LINE_BITS) - 1;
+const COLUMN_MASK = (1 << COLUMN_BITS) - 1;
+
+let locationMask = 0; 
+
+// Helper function to get one char token type 
+function getOneCharTokenType(char: string): FragmentType | null {
+  if (operatorsTable.has(char)) return FragmentType.Operator;
+  if (punctuatorsTable.has(char)) return FragmentType.Punctuator;
+  return null; 
+}
 
 export function getNextFragment(
   source: string,
   start: number,
   previousFragments: Fragment[],
-  fragmentCache: Map<string, Fragment>
-): Fragment | null {
-  // ... (memoization logic)
+): Fragment | null { 
 
-  if (
-    parserOptions.enableIncrementalParsing &&
-    start < previousFragments.length &&
-    previousFragments[start].end > start
-  ) {
-    // Reuse the previous fragment if it covers the current position
+  if (parserOptions.enableIncrementalParsing && start < previousFragments.length && previousFragments[start].end > start) {
     return previousFragments[start];
   }
 
@@ -32,6 +80,7 @@ export function getNextFragment(
   while (end < source.length) {
     const charCode = source.charCodeAt(end);
     if (charCode < 128) {
+      // Fast path for ASCII characters
       const flags = charFlags[charCode];
       if (flags & kIsWhitespace) {
         if (flags & kIsLineTerminator) {
@@ -42,19 +91,28 @@ export function getNextFragment(
         column++;
         end++;
       } else {
-        break; // Not whitespace, stop the loop
+        break; 
       }
     } else {
-      // Handle Unicode whitespace characters if needed
-      // ... (You'll need to implement this based on Unicode character categories)
-      break; // For now, assume non-ASCII characters are not whitespace
+      // Slow path for Unicode characters
+      if (isUnicodeWhitespace(charCode)) {
+        if (isUnicodeLineTerminator(charCode)) {
+          line++;
+          column = 0;
+          type |= FragmentType.Whitespace;
+        }
+        column++;
+        end++;
+      } else {
+        break; 
+      }
     }
   }
 
   const startLoc = (line << COLUMN_BITS) | column;
 
   // 2. Handle Hashbang Comment (#!)
-  if (start === 0 && source.startsWith("#!", end)) {
+  if (start === 0 && source.charCodeAt(0) === 35 && source.charCodeAt(1) === 33) { 
     type = FragmentType.HashbangComment;
     while (end < source.length && source.charCodeAt(end) !== 10) { // 10 is the charCode for '\n'
       value += source[end];
@@ -62,20 +120,30 @@ export function getNextFragment(
     }
   }
   // 3. Handle Comments (including HTML-like comments)
-  else if (source.startsWith("//", end)) {
-    // ... (handle single-line comment - similar to before)
-  } else if (source.startsWith("/*", end)) {
-    // ... (handle multi-line comment - similar to before)
-  } else if (source.startsWith("
-    // HTML-like comment
-    type = FragmentType.Comment;
-    value += "", end)) {
-        value += "-->";
-        end += 3;
-        break;
-      } else {
+  else if (source.charCodeAt(end) === 47) { 
+    if (source.charCodeAt(end + 1) === 47) { // Single-line comment
+      type = FragmentType.Comment;
+      end += 2; // Skip '//'
+      while (end < source.length && source.charCodeAt(end) !== 10) {
         value += source[end];
-        if (source[end] === "\n") {
+        end++;
+      }
+
+      // Check if there's another comment immediately after on the same line
+      let tempEnd = end + 1; // Skip the newline
+      while (tempEnd < source.length && charFlags[source.charCodeAt(tempEnd)] & kIsWhitespace) {
+        tempEnd++;
+      }
+      if (source.charCodeAt(tempEnd) === 47 && source.charCodeAt(tempEnd + 1) === 47) {
+        hasCommentAfter = true;
+      }
+    } else if (source.charCodeAt(end + 1) === 42) { // Multi-line comment
+      type = FragmentType.Comment;
+      value += "/*";
+      end += 2;
+      while (end < source.length && !(source.charCodeAt(end - 1) === 42 && source.charCodeAt(end) === 47)) {
+        value += source[end];
+        if (source.charCodeAt(end) === 10) {
           line++;
           column = 1;
         } else {
@@ -83,8 +151,32 @@ export function getNextFragment(
         }
         end++;
       }
+      if (end < source.length) {
+        value += "*/";
+        end++;
+      } else {
+        // Handle unterminated comment (error)
+        reportLexerError("Unterminated multi-line comment");
+        return null;
+      }
     }
-    if (end >= source.length) {
+  } else if (
+    source.charCodeAt(end) === 60 && 
+    source.charCodeAt(end + 1) === 33 && 
+    source.charCodeAt(end + 2) === 45 && 
+    source.charCodeAt(end + 3) === 45
+  ) { 
+    // HTML-like comment
+    if (!parserOptions.enableAnnexB) {
+      reportLexerError("HTML-like comments are not allowed in non-Annex B mode");
+      return null;
+    }
+
+    type = FragmentType.Comment;
+    value += "";
+      end += 3;
+    } else {
+      // Handle unterminated comment (error)
       reportLexerError("Unterminated HTML-like comment");
       return null;
     }
@@ -94,13 +186,13 @@ export function getNextFragment(
   if (type & (FragmentType.Comment | FragmentType.HashbangComment)) {
     // Update the 'hasCommentBefore' flag of the next non-whitespace fragment
     let nextNonWhitespaceFragment = getNextNonWhitespaceFragment(source, end);
+
     if (nextNonWhitespaceFragment) {
       nextNonWhitespaceFragment.hasCommentBefore = true;
-      fragmentCache.set(`<span class="math-inline">\{nextNonWhitespaceFragment\.start\}\-</span>{source.slice(nextNonWhitespaceFragment.start)}`, nextNonWhitespaceFragment);
     }
 
     currentPos = end;
-    return getNextFragment(source, currentPos, previousFragments, fragmentCache);
+    return getNextFragment(source, currentPos, previousFragments); 
   }
 
   // 4. Handle Identifiers and Keywords
@@ -109,10 +201,10 @@ export function getNextFragment(
     containsEscape = end > 0 && source[end - 1] === "\\";
     if (containsEscape) {
       end++; // Skip the backslash
-      value += "\\";
+      value += "\\"; 
     }
 
-    type |= FragmentType.Identifier;
+    type |= FragmentType.Identifier; 
     let currentCharFlags = firstCharFlags;
 
     do {
@@ -134,18 +226,30 @@ export function getNextFragment(
         reportLexerError(`Unexpected reserved word: '${value}'`);
         return null;
       }
+    } else if (containsEscape && keywordsTable.has(value.slice(1))) { 
+      // If it's an escaped keyword, throw an error
+      reportLexerError(`Unexpected escaped keyword: '${value}'`);
+      return null;
     }
 
     // Update line and column
     updateLineAndColumn(source, start, end, line, column);
   }
-  // 5. Numeric Literals
+  // 5. Numeric Literals 
   else if (firstCharFlags & kIsDecimalDigit || (source[end] === "." && isDecimalDigit(source.charCodeAt(end + 1)))) {
     type = FragmentType.Literal;
     let numberType = NUMBER_DECIMAL;
 
-    // Handle potential leading zero for hex, octal, or binary
-    if (source[end] === "0") {
+    // Handle fractional numbers starting with '.'
+    let startsWithDecimal = false;
+    if (source[end] === ".") {
+      startsWithDecimal = true;
+      value += ".";
+      end++;
+    }
+
+    // Handle potential leading zero for hex, octal, or binary (only if not starting with '.')
+    if (!startsWithDecimal && source[end] === "0") {
       const nextChar = source[end + 1]?.toLowerCase();
       if (nextChar === "x") {
         numberType = NUMBER_HEX;
@@ -169,8 +273,8 @@ export function getNextFragment(
       }
     }
 
-    // Parse integer part (before decimal point or exponent)
-    let hasDigits = false; // Track if any digits were encountered
+    // Parse integer/fractional part 
+    let hasDigits = false; 
     while (end < source.length) {
       const charCode = source.charCodeAt(end);
       if (isDigitForNumberType(charCode, numberType)) {
@@ -185,9 +289,16 @@ export function getNextFragment(
       end++;
     }
 
-    if (!hasDigits) {
+    if (!hasDigits && !startsWithDecimal) {
       reportLexerError("Expected digits in numeric literal");
       return null;
+    } else if (!hasDigits && startsWithDecimal) {
+      // If it starts with '.' and has no digits, it's not a number
+      // Rewind to the '.' and return it as a punctuator
+      end = start; 
+      type = FragmentType.Punctuator;
+      value = ".";
+      break; 
     }
 
     // Parse fractional part (after decimal point)
@@ -268,11 +379,110 @@ export function getNextFragment(
   }
   // 3. String Literals (with lazy escape sequence decoding)
   else if (source[end] === '"' || source[end] === "'") {
-    // ... (same as before)
+    type = FragmentType.Literal;
+    const quote = source[end];
+    end++;
+    while (end < source.length && source[end] !== quote) {
+      if (source[end] === "\\") {
+        // Lazily decode escape sequences only if needed (e.g., for constant folding or linting)
+        if (needsEscapeDecoding(parserOptions)) {
+          const [escapedChar, newEnd] = handleStringEscape(source, end);
+          if (escapedChar === null) {
+            // Invalid escape sequence
+            reportLexerError("Invalid escape sequence in string literal");
+            return null;
+          }
+          value += escapedChar;
+          end = newEnd;
+        } else {
+          // If escape decoding is not needed, keep the escape sequence as is
+          value += "\\" + source[end + 1];
+          end += 2;
+        }
+      } else if (source[end] === "\n") {
+        reportLexerError("Unterminated string literal");
+        return null;
+      } else {
+        value += source[end];
+        end++;
+      }
+    }
+    if (end >= source.length) {
+      reportLexerError("Unterminated string literal");
+      return null;
+    }
+    end++; // Include the closing quote
+    value += quote;
+
+    // Update
+    // Update line and column
+    updateLineAndColumn(source, start, end, line, column);
   }
   // 4. Template Literals (with cooked and raw content)
   else if (source[end] === "`") {
-    // ... (same as before)
+    type = FragmentType.Literal;
+    let inExpression = false;
+    let cookedContent = "";
+    let rawContent = "`";
+    end++;
+
+    while (end < source.length) {
+      if (source[end] === "`") {
+        cookedContent += "`";
+        rawContent += "`";
+        end++;
+        break;
+      } else if (source[end] === "<span class="math-inline">" && source\[end \+ 1\] \=\=\= "\{"\) \{
+cookedContent \+\= "</span>{";
+        rawContent += "${";
+        end += 2;
+        inExpression = true;
+      } else if (source[end] === "}" && inExpression) {
+        cookedContent += "}";
+        rawContent += "}";
+        end++;
+        inExpression = false;
+      } else if (source[end] === "\\") {
+        // Handle escape sequences (lazily decode if needed)
+        if (needsEscapeDecoding(parserOptions)) {
+          const [escapedChar, newEnd] = handleStringEscape(source, end);
+          if (escapedChar === null) {
+            reportLexerError("Invalid escape sequence in template literal");
+            return null;
+          }
+          cookedContent += escapedChar;
+          rawContent += source.slice(end, newEnd); // Keep the raw escape sequence
+          end = newEnd;
+        } else {
+          cookedContent += "\\" + source[end + 1];
+          rawContent += "\\" + source[end + 1];
+          end += 2;
+        }
+      } else {
+        cookedContent += source[end];
+        rawContent += source[end];
+        end++;
+      }
+    }
+
+    if (end >= source.length) {
+      reportLexerError("Unterminated template literal");
+      return null;
+    }
+
+    // Update line and column
+    updateLineAndColumn(source, start, end, line, column);
+
+    return {
+      type,
+      value: rawContent, // Store the raw content for potential transformations
+      start,
+      end,
+      loc: (startLoc << 12) | endLoc,
+      hasCommentBefore,
+      hasCommentAfter,
+      cookedContent, // Store the cooked content for evaluation or other purposes
+    };
   }
   // 5. Operators and Punctuators
   else {
@@ -282,7 +492,7 @@ export function getNextFragment(
       value += source[end];
       end++;
 
-      // Handle multi-character operators/punctuators 
+      // Handle multi-character operators/punctuators (e.g., '++', '===', '...')
       while (
         end < source.length &&
         (operatorsTable.has(value + source[end]) ||
@@ -292,9 +502,16 @@ export function getNextFragment(
         end++;
       }
 
+      // Special case for '?.' - check if it's followed by a digit
+      if (value === "?." && isDecimalDigit(source.charCodeAt(end))) {
+        // If followed by a digit, it's part of an optional chaining call, not a separate operator
+        type = FragmentType.None; 
+        value = "";
+        end = start; // Rewind to the start position
+      }
+
       // Update line and column
-      updateLineAndColumn(source,
-      source, start, end, line, column); 
+      updateLineAndColumn(source, start, end, line, column);
     }
   }
 
@@ -304,30 +521,39 @@ export function getNextFragment(
   }
 
   const endLoc = (line << COLUMN_BITS) | column;
-  return { 
-    type, 
-    value, 
-    start, 
-    end, 
-    loc: (startLoc << 12) | endLoc, 
-    hasCommentBefore, 
-    hasCommentAfter, 
+
+  // Check for comment immediately after the fragment on the same line
+  let tempEnd = end;
+  while (tempEnd < source.length && charFlags[source.charCodeAt(tempEnd)] & kIsWhitespace) {
+    if (charFlags[source.charCodeAt(tempEnd)] & kIsLineTerminator) {
+      break; // Stop if we encounter a line terminator
+    }
+    tempEnd++;
+  }
+  if (
+    (source.charCodeAt(tempEnd) === 47 && source.charCodeAt(tempEnd + 1) === 47) || // '//'
+    (source.charCodeAt(tempEnd) === 47 && source.charCodeAt(tempEnd + 1) === 42)    // '/*'
+  ) {
+    hasCommentAfter = true;
+  }
+
+  return {
+    type,
+    value,
+    start,
+    end,
+    loc: (startLoc << 12) | endLoc,
+    hasCommentBefore,
+    hasCommentAfter,
     containsEscape,
-    cookedContent: type === FragmentType.Literal && source[start] === '`' ? cookedContent : undefined 
+    cookedContent: type === FragmentType.Literal && source[start] === "`" ? cookedContent : undefined,
   };
 }
 
+// Helper functions
+
 function isDigitForNumberType(charCode: number, numberType: number): boolean {
-  if (numberType & NUMBER_DECIMAL) {
-    return isDecimalDigit(charCode);
-  } else if (numberType & NUMBER_HEX) {
-    return isHexDigit(charCode);
-  } else if (numberType & NUMBER_OCTAL) {
-    return isOctalDigit(charCode);
-  } else if (numberType & NUMBER_BINARY) {
-    return isBinaryDigit(charCode);
-  }
-  return false; 
+  // ... (same as before)
 }
 
 function isWhitespace(charCode: number): boolean {
@@ -335,10 +561,31 @@ function isWhitespace(charCode: number): boolean {
     return !!(charFlags[charCode] & kIsWhitespace);
   }
 
-  // Handle Unicode whitespace characters if needed
-  // ... (You'll need to implement this based on Unicode character categories)
+  // Handle Unicode whitespace characters 
+  return (
+    charCode === 0x20 || // Space
+    charCode === 0x09 || // Tab
+    charCode === 0x0b || // Vertical Tab
+    charCode === 0x0c || // Form Feed
+    charCode === 0xa0 || // No-break space
+    (charCode >= 0x1680 && charCode <= 0x180e) || // Ogham space mark, etc.
+    (charCode >= 0x2000 && charCode <= 0x200a) || // En quad, hair space, etc.
+    charCode === 0x202f || // Narrow no-break space
+    charCode === 0x205f || // Medium mathematical space
+    charCode === 0x3000 || // Ideographic space
+    charCode === 0xfeff    // Byte Order Mark
+  );
+}
 
-  return false; // For now, assume non-ASCII characters are not whitespace
+function isUnicodeWhitespace(charCode: number): boolean {
+  // TODO: Check if the character is a Unicode whitespace character
+
+  return false;
+}
+
+function isUnicodeLineTerminator(charCode: number): boolean {
+  // Check if the character is a Unicode line terminator
+  return charCode === 0x0a || charCode === 0x0d || charCode === 0x2028 || charCode === 0x2029;
 }
 
 function isASCIIIdentifierStart(char: string): boolean {
@@ -350,10 +597,9 @@ function isIdentifierStart(charCode: number): boolean {
     return !!(charFlags[charCode] & kIsAsciiIdentifierStart);
   }
 
-  // Handle Unicode identifier start characters
-  // ... (You'll need to implement this based on Unicode character categories)
-
-  return false; // Placeholder 
+  // TODO: Handle Unicode identifier start characters
+  
+  return false; 
 }
 
 function isIdentifierPart(charCode: number): boolean {
@@ -361,10 +607,9 @@ function isIdentifierPart(charCode: number): boolean {
     return !!(charFlags[charCode] & kIsAsciiIdentifierPart);
   }
 
-  // Handle Unicode identifier part characters
-  // ... (You'll need to implement this based on Unicode character categories)
+  // TODO: Handle Unicode identifier part characters
 
-  return false; // Placeholder
+  return false; 
 }
 
 function reportLexerError(message: string): void {
@@ -373,94 +618,177 @@ function reportLexerError(message: string): void {
     message,
     line,
     column,
-    ruleId: "lexer-error", // Or a more specific rule ID
+    ruleId: "lexer-error", 
   });
 }
 
 // Helper function to get the next non-whitespace fragment
 function getNextNonWhitespaceFragment(code: string, start: number): Fragment | null {
-  let pos = start;
-  while (pos < code.length) {
-    const fragment = getNextFragment(code, pos, [], new Map());
-    if (!fragment) return null;
-    if (!(fragment.type & FragmentType.Whitespace)) {
-      return fragment;
-    }
-    pos = fragment.end;
-  }
-  return null;
+  // ... 
 }
 
 // Helper function to get the previous comment fragment
 function getPreviousCommentFragment(code: string, start: number): Fragment | null {
-  // ... (implementation from previous response)
+  // ... 
 }
 
 // Helper function to get the next comment fragment
 function getNextCommentFragment(code: string, start: number): Fragment | null {
-  // ... (implementation from previous response)
+  // ... 
 }
 
-// ... (rest of the code in parser.ts)
-
-// defaultPrettyPrint function (enhanced for comment handling)
-function defaultPrettyPrint(ast: ASTNode, options: PrettyPrintOptions): string {
-  let formattedCode = "";
-  let indentLevel = 0;
-  let currentLineLength = 0;
-  let shouldBreakLine = false; 
-  let previousFragment: Fragment | null = null;
-
-  function printNode(node: ASTNode | null | undefined) {
-    if (!node) return;
-
-    // Handle comments associated with the node
-    if (node.hasComment && !options.minify) {
-      // ... (insert comments before the node, considering indentation)
+// Helper function to update line and column
+function updateLineAndColumn(
+  source: string,
+  start: number,
+  end: number,
+  line: number,
+  column: number
+) {
+  for (let i = start; i < end; i++) {
+    const charCode = source.charCodeAt(i);
+    if (isUnicodeLineTerminator(charCode)) {
+      line++;
+      column = 1;
+    } else {
+      column++;
     }
+  }
+}
 
-    switch (node.type) {
-      // ... (other cases)
+// Helper function to handle string escape sequences (slow path)
+function handleStringEscape(source: string, start: number): [string | null, number] {
+  let end = start + 1; // Skip the backslash
 
-      case ASTNodeType.TemplateLiteral: {
-        const templateLiteral = node as TemplateLiteral;
-        let result = "";
-        for (let i = 0; i < templateLiteral.quasis.length; i++) {
-          const quasi = templateLiteral.quasis[i];
-          result += quasi.value.cooked; // Use cooked content for default printing
-
-          if (i < templateLiteral.expressions.length) {
-            const expr = templateLiteral.expressions[i];
-            result += "${";
-            printNode(expr);
-            result += "}";
-
-            // Handle comments between "${" and the expression
-            const nextFragment = getNextNonWhitespaceFragment(result, result.lastIndexOf("${") + 2);
-            if (nextFragment && nextFragment.hasCommentBefore) {
-              const commentFragment = getPreviousCommentFragment(result, nextFragment.start);
-              if (commentFragment) {
-                result = result.slice(0, nextFragment.start) + commentFragment.value + " " + result.slice(nextFragment.start);
-              }
-            }
-          }
-        }
-        formattedCode += result;
-        break;
-      }
-
-      // ... (other cases)
-    }
-
-    // ... (handle comments associated with the node (after the node))
-
-    // ... (check if a line break is needed after this node)
+  if (end >= source.length) {
+    reportLexerError("Unterminated string/template literal");
+    return [null, start]; 
   }
 
-  // Start printing from the AST root
-  printNode(ast);
+  const escapedChar = source[end];
 
-  return formattedCode;
+  switch (escapedChar) {
+    case "'":
+    case '"':
+    case "\\":
+    case "b":
+    case "f":
+    case "n":
+    case "r":
+    case "t":
+    case "v":
+      end++; 
+      return [escapedChar, end];
+
+    case "x":
+      // Hexadecimal escape sequence (\xHH)
+      if (end + 2 < source.length && isHexDigit(source.charCodeAt(end + 1)) && isHexDigit(source.charCodeAt(end + 2))) {
+        const hexValue = source.slice(end + 1, end + 3);
+        end += 3;
+        return [String.fromCharCode(parseInt(hexValue, 16)), end];
+      } else {
+        reportLexerError("Invalid hexadecimal escape sequence");
+        return [null, start];
+      }
+
+    case "u":
+      // Unicode escape sequence (\uHHHH or \u{H...H})
+      if (source[end + 1] === "{") {
+        // \u{H...H} format
+        let codePoint = 0;
+        end += 2; 
+        while (end < source.length && source[end] !== "}") {
+          if (isHexDigit(source.charCodeAt(end))) {
+            codePoint = codePoint * 16 + parseInt(source[end], 16);
+            if (codePoint > 0x10ffff) {
+              reportLexerError("Invalid Unicode code point");
+              return [null, start];
+            }
+            end++;
+          } else {
+            reportLexerError("Invalid Unicode escape sequence");
+            return [null, start];
+          }
+        }
+        if (end >= source.length) {
+          reportLexerError("Unterminated Unicode escape sequence");
+          return [null, start];
+        }
+        end++; 
+        return [String.fromCodePoint(codePoint), end];
+      } else {
+        // \uHHHH format
+        if (
+          end + 4 < source.length &&
+          isHexDigit(source.charCodeAt(end + 1)) &&
+          isHexDigit(source.charCodeAt(end + 2)) &&
+          isHexDigit(source.charCodeAt(end + 3)) &&
+          isHexDigit(source.charCodeAt(end + 4))
+        ) {
+          const hexValue = source.slice(end + 1, end + 5);
+          end += 5;
+          return [String.fromCharCode(parseInt(hexValue, 16)), end];
+        } else {
+          reportLexerError("Invalid Unicode escape sequence");
+          return [null, start]; 
+        }
+      }
+
+    case "0":
+    case "1":
+    case "2":
+    case "3":
+    case "4":
+    case "5":
+    case "6":
+    case "7":
+      // Legacy octal escape sequence (disallowed in strict mode)
+      if (currentScope?.isStrict) {
+        reportLexerError("Octal escape sequences are not allowed in strict mode");
+        return [null, start];
+      }
+
+      // Parse up to 3 octal digits
+      let octalValue = parseInt(escapedChar);
+      end++;
+      if (end < source.length && isOctalDigit(source.charCodeAt(end))) {
+        octalValue = octalValue * 8 + parseInt(source[end]);
+        end++;
+        if (end < source.length && isOctalDigit(source.charCodeAt(end))) {
+          octalValue = octalValue * 8 + parseInt(source[end]);
+          end++;
+        }
+      }
+
+      // Octal escape sequences cannot represent code points greater than 255 (0xff)
+      if (octalValue > 255) {
+        reportLexerError("Invalid octal escape sequence");
+        return [null, start];
+      }
+
+      return [String.fromCharCode(octalValue), end];
+
+    case "8":
+    case "9":
+      // Disallowed in strict mode
+      if (currentScope?.isStrict) {
+        reportLexerError(`Invalid escape sequence in strict mode: '\\${escapedChar}'`);
+        return [null, start];
+      }
+      // In non-strict mode, treat them as identity escapes
+      end++;
+      return [escapedChar, end];
+
+    case "\n":
+    case "\r":
+    case "\u2028":
+    case "\u2029":
+      // Line continuation - ignore the backslash and line terminator
+      end++; // Skip the line terminator
+      return ["", end];
+    default:
+      // Other escape sequences or invalid escapes
+      reportLexerError(`Invalid escape sequence: '\\${escapedChar}'`);
+      return [null, start];
+  }
 }
-
-// ... (rest of the code in parser.ts)
